@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
-# plugin M5 self-check :: 在 start.demo.sh 的 sandbox self-check 段被调用。
-# 设计依据：proposal/proposal_rename_to_insights_share.md §"验证门禁"。
-# 输出契约：每行一个组件一条 "OK"/"MISSING"/"PARSE-FAIL"，非零退出仅当有任一 MISSING。
+# plugin publish-repo self-check。
+# 输出契约：每行一个组件一条 "OK"/"MISSING"/"PARSE-FAIL"，非零退出仅当有任一失败。
 
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+MANIFEST="$PLUGIN_DIR/.claude-plugin/plugin.json"
+MARKETPLACE="$PLUGIN_DIR/.claude-plugin/marketplace.json"
 MCP_CONFIG="$PLUGIN_DIR/mcp/wiki-server.json"
 PUBLISH_SCRIPT="$PLUGIN_DIR/scripts/publish_marketplace.py"
 
 fail_count=0
 say() { printf '%s\n' "$*"; }
 
-# manifest
-MANIFEST="$PLUGIN_DIR/.claude-plugin/plugin.json"
 if [ -f "$MANIFEST" ]; then
   if NAME_VER="$(/usr/bin/python3 -c 'import json,sys
 m=json.load(open(sys.argv[1]))
@@ -29,15 +28,13 @@ else
   fail_count=$((fail_count+1))
 fi
 
-# marketplace
-if [ -f "$PLUGIN_DIR/.claude-plugin/marketplace.json" ]; then
+if [ -f "$MARKETPLACE" ]; then
   say "marketplace: OK"
 else
   say "marketplace: MISSING"
   fail_count=$((fail_count+1))
 fi
 
-# skills
 for s in insights-share insights-share-server; do
   if [ -f "$PLUGIN_DIR/skills/$s/SKILL.md" ]; then
     say "skill $s: OK"
@@ -47,7 +44,6 @@ for s in insights-share insights-share-server; do
   fi
 done
 
-# hook
 if [ -x "$PLUGIN_DIR/hooks/user-prompt-submit.sh" ]; then
   say "hook UserPromptSubmit: OK"
 else
@@ -55,7 +51,6 @@ else
   fail_count=$((fail_count+1))
 fi
 
-# statusline
 if [ -x "$PLUGIN_DIR/statusline/insights_share_statusline.sh" ]; then
   say "plugin statusline: OK"
 else
@@ -63,7 +58,6 @@ else
   fail_count=$((fail_count+1))
 fi
 
-# commands
 for c in share-install share-search share-publish share-review share-diff; do
   if [ -f "$PLUGIN_DIR/commands/$c.md" ]; then
     say "command /$c: OK"
@@ -73,7 +67,6 @@ for c in share-install share-search share-publish share-review share-diff; do
   fi
 done
 
-# agents (M2+)
 for a in share-curator share-validator; do
   if [ -f "$PLUGIN_DIR/agents/$a.md" ]; then
     say "agent $a: OK"
@@ -83,7 +76,6 @@ for a in share-curator share-validator; do
   fi
 done
 
-# mcp
 if [ -f "$MCP_CONFIG" ]; then
   if NAME_TOOLS="$(/usr/bin/python3 -c 'import json,sys
 cfg=json.load(open(sys.argv[1]))
@@ -98,7 +90,6 @@ else
   fail_count=$((fail_count+1))
 fi
 
-# publish script
 if [ -f "$PUBLISH_SCRIPT" ]; then
   if /usr/bin/python3 "$PUBLISH_SCRIPT" --check >/dev/null 2>&1; then
     say "marketplace publish script: OK"
@@ -111,17 +102,17 @@ else
   fail_count=$((fail_count+1))
 fi
 
-# manifest declares M5 rename contract
 if [ -f "$MANIFEST" ]; then
-  if /usr/bin/python3 - "$MANIFEST" "$MCP_CONFIG" <<'PY' >/dev/null 2>&1
+  if /usr/bin/python3 - "$MANIFEST" "$MCP_CONFIG" "$MARKETPLACE" <<'PY' >/dev/null 2>&1
 import json, sys
 m = json.load(open(sys.argv[1]))
 cfg = json.load(open(sys.argv[2]))
+market = json.load(open(sys.argv[3]))
 assert m["name"] == "insights-share", "name"
-assert m["version"] == "0.5.0-m5", "version"
-assert m["milestones"]["current"] == "M5_RENAME", "milestone current"
+assert m["version"] == "0.6.0-m7", "version"
+assert m["milestones"]["current"] == "M7_LATENCY_DEEP", "milestone current"
 assert "M5_RENAME" in m["milestones"].get("completed", []), "m5 completed"
-assert m["milestones"].get("pending", []) == [], "pending"
+assert "M7_LATENCY_DEEP" in m["milestones"].get("partial", []), "m7 partial"
 assert len(m["entry"].get("agents", [])) == 2, "agents count"
 assert len(m["entry"].get("commands", [])) == 5, "commands count"
 assert all(c.startswith("commands/share-") for c in m["entry"]["commands"]), "commands prefix"
@@ -131,19 +122,23 @@ assert m["entry"]["skills"] == [
     "skills/insights-share/SKILL.md",
     "skills/insights-share-server/SKILL.md",
 ], "skills paths"
+assert m["requires"]["daemon"]["insightsd"] == "http://192.168.22.42:7821", "daemon url"
+assert market["name"] == "insights-share-plugin", "marketplace name"
+assert market["plugins"][0]["source"] == "./", "marketplace source"
+assert market["plugins"][0]["version"] == m["version"], "marketplace version"
 assert len(cfg.get("tools", [])) >= 7, "mcp tools"
 assert cfg.get("capabilities", {}).get("signed_cards") is True, "signed cards"
 PY
   then
-    say "manifest M5 contract (name=insights-share, ver=0.5.0-m5, share-* cmds/agents, mcp>=7, signed_cards): OK"
+    say "manifest M7 publish contract (name=insights-share, ver=0.6.0-m7, source=./, daemon=192.168.22.42, share-* cmds/agents, mcp>=7, signed_cards): OK"
   else
-    say "manifest M5 contract: FAIL"
+    say "manifest M7 publish contract: FAIL"
     fail_count=$((fail_count+1))
   fi
 fi
 
 if [ "$fail_count" -gt 0 ]; then
-  say "plugin self-check: FAIL ($fail_count missing)"
+  say "plugin self-check: FAIL ($fail_count)"
   exit 1
 fi
 say "plugin self-check: ALL GREEN"

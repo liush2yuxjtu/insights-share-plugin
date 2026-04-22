@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""生成 insights-share 的 M5 marketplace 发布摘要。"""
+"""生成 insights-share publish 仓的 marketplace 发布摘要。"""
 
 from __future__ import annotations
 
@@ -9,13 +9,13 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-PLUGIN_DIR = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[1]
+PLUGIN_DIR = REPO_ROOT
 MANIFEST = PLUGIN_DIR / ".claude-plugin" / "plugin.json"
 MARKETPLACE = PLUGIN_DIR / ".claude-plugin" / "marketplace.json"
 README = PLUGIN_DIR / "README.md"
 MCP = PLUGIN_DIR / "mcp" / "wiki-server.json"
-DEFAULT_OUTPUT = REPO_ROOT / "insights-share" / "release" / "plugin-marketplace-0.5.0-m5.json"
+DEFAULT_OUTPUT = REPO_ROOT / "release" / "plugin-marketplace-0.6.0-m7.json"
 
 
 def _sha256(path: Path) -> str:
@@ -32,14 +32,23 @@ def _validate_contract() -> tuple[dict, dict]:
     plugin = marketplace["plugins"][0]
 
     assert manifest["name"] == "insights-share", "manifest name"
-    assert manifest["version"] == "0.5.0-m5", "manifest version"
+    assert manifest["version"] == "0.6.0-m7", "manifest version"
+    assert manifest["milestones"]["current"] == "M7_LATENCY_DEEP", "milestone current"
+    assert "M5_RENAME" in manifest["milestones"]["completed"], "m5 completed"
+    assert "M7_LATENCY_DEEP" in manifest["milestones"].get("partial", []), "m7 partial"
+    assert manifest["requires"]["daemon"]["insightsd"] == "http://192.168.22.42:7821", "daemon url"
+
+    assert marketplace["name"] == "insights-share-plugin", "marketplace name"
+    assert marketplace.get("metadata", {}).get("version") == manifest["version"], "metadata version"
+    assert marketplace.get("metadata", {}).get("pluginRoot") == ".", "plugin root"
     assert plugin["name"] == "insights-share", "marketplace plugin name"
     assert plugin["version"] == manifest["version"], "marketplace version"
-    assert "subdir=plugins/insights-share" in plugin["source"], "marketplace subdir"
-    assert manifest["milestones"]["current"] == "M5_RENAME", "milestone current"
-    assert "M5_RENAME" in manifest["milestones"]["completed"], "m5 completed"
-    assert manifest["milestones"].get("pending", []) == [], "pending milestones"
-    assert "签名" in README.read_text(encoding="utf-8"), "readme signing"
+    assert plugin["source"] == "./", "marketplace source"
+
+    readme_text = README.read_text(encoding="utf-8")
+    assert "双仓说明" in readme_text, "readme dual repo note"
+    assert "签名" in readme_text, "readme signing"
+
     mcp = _read_json(MCP)
     tool_names = [tool["name"] for tool in mcp.get("tools", [])]
     assert "wiki_public_keys" in tool_names, "mcp public keys tool"
@@ -52,7 +61,7 @@ def _build_bundle(manifest: dict, marketplace: dict) -> dict:
         if not path.is_file():
             continue
         rel = path.relative_to(PLUGIN_DIR).as_posix()
-        if "__pycache__" in rel:
+        if rel.startswith(".git/") or "__pycache__" in rel:
             continue
         files.append({"path": rel, "sha256": _sha256(path)})
     return {
