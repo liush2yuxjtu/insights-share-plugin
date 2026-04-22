@@ -11,7 +11,7 @@
   "plugins": [
     {
       "name": "insights-share",
-      "source": ".",
+      "source": "./",
       "description": "局域网 insights-share：topic 中心 Good/Bad 并列卡片的静默回灌 + 管理面板。M6/M7 latency 交付（cache-hit p95=1ms）",
       "version": "0.6.0-m7",
       "keywords": ["insights-share", "wiki", "topic", "good-bad", "marketplace", "latency", "cache"]
