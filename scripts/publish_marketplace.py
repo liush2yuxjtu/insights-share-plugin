@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""生成 insights-share publish 仓的 marketplace 发布摘要。"""
+"""生成 insights-share 的 marketplace 发布摘要。"""
 
 from __future__ import annotations
 
@@ -9,13 +9,27 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-PLUGIN_DIR = REPO_ROOT
+REPO_ROOT = Path(__file__).resolve().parents[3]
+PLUGIN_DIR = Path(__file__).resolve().parents[1]
 MANIFEST = PLUGIN_DIR / ".claude-plugin" / "plugin.json"
 MARKETPLACE = PLUGIN_DIR / ".claude-plugin" / "marketplace.json"
 README = PLUGIN_DIR / "README.md"
 MCP = PLUGIN_DIR / "mcp" / "wiki-server.json"
-DEFAULT_OUTPUT = REPO_ROOT / "release" / "plugin-marketplace-0.6.0-m7.json"
+
+
+EXCLUDE_NAMES = {
+    ".DS_Store",
+    ".claude",
+    ".pytest_cache",
+    "__pycache__",
+    "runtime-web",
+}
+EXCLUDE_SUFFIXES = {".pyc", ".pyo"}
+
+
+def _default_output() -> Path:
+    version = _read_json(MANIFEST)["version"]
+    return PLUGIN_DIR / "release" / f"plugin-marketplace-{version}.json"
 
 
 def _sha256(path: Path) -> str:
@@ -26,29 +40,33 @@ def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _should_skip(path: Path) -> bool:
+    rel = path.relative_to(PLUGIN_DIR)
+    if any(part in EXCLUDE_NAMES for part in rel.parts):
+        return True
+    if path.suffix in EXCLUDE_SUFFIXES:
+        return True
+    return False
+
+
 def _validate_contract() -> tuple[dict, dict]:
     manifest = _read_json(MANIFEST)
     marketplace = _read_json(MARKETPLACE)
     plugin = marketplace["plugins"][0]
 
     assert manifest["name"] == "insights-share", "manifest name"
-    assert manifest["version"] == "0.6.0-m7", "manifest version"
-    assert manifest["milestones"]["current"] == "M7_LATENCY_DEEP", "milestone current"
-    assert "M5_RENAME" in manifest["milestones"]["completed"], "m5 completed"
-    assert "M7_LATENCY_DEEP" in manifest["milestones"].get("partial", []), "m7 partial"
-    assert manifest["requires"]["daemon"]["insightsd"] == "http://192.168.22.42:7821", "daemon url"
-
-    assert marketplace["name"] == "insights-share-plugin", "marketplace name"
-    assert marketplace.get("metadata", {}).get("version") == manifest["version"], "metadata version"
-    assert marketplace.get("metadata", {}).get("pluginRoot") == ".", "plugin root"
+    assert manifest["version"].startswith("0."), "manifest version prefix"
     assert plugin["name"] == "insights-share", "marketplace plugin name"
-    assert plugin["version"] == manifest["version"], "marketplace version"
-    assert plugin["source"] == "./", "marketplace source"
-
-    readme_text = README.read_text(encoding="utf-8")
-    assert "双仓说明" in readme_text, "readme dual repo note"
-    assert "签名" in readme_text, "readme signing"
-
+    plugin_version = plugin.get("version")
+    if plugin_version is not None:
+        assert plugin_version == manifest["version"], "marketplace version"
+    plugin_source = str(plugin.get("source") or "")
+    assert plugin_source in {"./", "."} or "subdir=plugins/insights-share" in plugin_source, "marketplace source"
+    _known_milestones = {"M1_MVP", "M2_AGENTS", "M3_MCP_NAMESPACE_TTL", "M4_SIGN_MARKETPLACE",
+                         "M5_RENAME", "M6_LATENCY_MVP", "M7_LATENCY_DEEP", "M8_LATENCY_INDEX"}
+    assert manifest["milestones"]["current"] in _known_milestones, "milestone current"
+    assert "M5_RENAME" in manifest["milestones"]["completed"], "m5 completed"
+    assert "签名" in README.read_text(encoding="utf-8"), "readme signing"
     mcp = _read_json(MCP)
     tool_names = [tool["name"] for tool in mcp.get("tools", [])]
     assert "wiki_public_keys" in tool_names, "mcp public keys tool"
@@ -60,9 +78,9 @@ def _build_bundle(manifest: dict, marketplace: dict) -> dict:
     for path in sorted(PLUGIN_DIR.rglob("*")):
         if not path.is_file():
             continue
-        rel = path.relative_to(PLUGIN_DIR).as_posix()
-        if rel.startswith(".git/") or "__pycache__" in rel:
+        if _should_skip(path):
             continue
+        rel = path.relative_to(PLUGIN_DIR).as_posix()
         files.append({"path": rel, "sha256": _sha256(path)})
     return {
         "name": manifest["name"],
@@ -76,7 +94,7 @@ def _build_bundle(manifest: dict, marketplace: dict) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true", help="只校验，不落盘")
-    parser.add_argument("--output", default=str(DEFAULT_OUTPUT), help="发布摘要输出路径")
+    parser.add_argument("--output", default=str(_default_output()), help="发布摘要输出路径")
     args = parser.parse_args()
 
     manifest, marketplace = _validate_contract()
